@@ -9,9 +9,35 @@ defmodule EcoSyncBackend.Drive do
   @waste_extensions ~w(.tmp .temp .bak .old .log .cache .dmg .iso .exe .msi .deb .rpm .DS_Store .thumbs.db)
   @large_file_threshold_mb 100
 
+  @type waste_category :: :duplicado | :temporal | :pesado | :antiguo | :activo
+
+  @type drive_file :: %{
+          id: String.t(),
+          name: String.t(),
+          size_bytes: non_neg_integer(),
+          size_mb: float(),
+          mime_type: String.t(),
+          modified_time: String.t() | nil,
+          viewed_time: String.t() | nil,
+          is_waste: boolean(),
+          waste_category: waste_category(),
+          waste_reason: String.t()
+        }
+
+  @type scan_result :: %{
+          total_files: non_neg_integer(),
+          waste_files: non_neg_integer(),
+          total_size_gb: float(),
+          waste_size_gb: float(),
+          co2_grams_per_year: float(),
+          quota: map(),
+          files: [drive_file()]
+        }
+
   @doc """
   Analiza todos los archivos y los clasifica según su potencial de basura.
   """
+  @spec scan_for_waste(map()) :: scan_result()
   def scan_for_waste(client) do
     files = GoogleClient.list_all_files(client)
     quota = GoogleClient.get_storage_quota(client)

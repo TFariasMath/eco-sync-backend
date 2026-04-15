@@ -7,16 +7,45 @@ defmodule EcoSyncBackend.Repos do
   alias EcoSyncBackend.GitHub.Client, as: GitHubClient
   alias EcoSyncBackend.Scanner
 
+  @type repo() :: %{
+          name: String.t(),
+          url: String.t(),
+          last_commit_date: DateTime.t() | nil,
+          days_inactive: integer(),
+          language: String.t() | nil,
+          visibility: String.t()
+        }
+
+  @type inactive_result() :: %{
+          total_repos: integer(),
+          inactivity_count: integer(),
+          inactivity_threshold_months: integer(),
+          repos: [repo()]
+        }
+
+  @type dead_forks_result() :: %{
+          total_forks: integer(),
+          dead_forks_count: integer(),
+          forks: [map()]
+        }
+
+  @type secrets_result() :: %{
+          total_repos_scanned: integer(),
+          findings_count: integer(),
+          repos: [map()]
+        }
+
   @doc """
   Analiza todos los repositorios y devuelve los considerados inactivos.
   """
+  @spec get_inactive_repos(map(), integer(), map()) :: inactive_result()
   def get_inactive_repos(client, months \\ 6, filters \\ %{}) do
     now = DateTime.utc_now()
     threshold = DateTime.add(now, -(months * 30 * 24 * 60 * 60), :second)
 
     all_repos = GitHubClient.get_repos(client)
 
-    inactive = 
+    inactive =
       all_repos
       |> Enum.filter(&matches_filters?(&1, filters))
       |> Enum.reduce([], fn repo, acc ->
@@ -25,16 +54,17 @@ defmodule EcoSyncBackend.Repos do
 
         # Fast path: pushed_at
         pushed_at = parse_datetime(repo["pushed_at"])
-        
+
         if pushed_at && DateTime.compare(pushed_at, threshold) != :lt do
-          acc # Reciente, omitir
+          # Reciente, omitir
+          acc
         else
           # Slow path: real last commit
           last_commit = GitHubClient.get_last_commit_date(client, owner, name) || pushed_at
 
           if last_commit && DateTime.compare(last_commit, threshold) == :lt do
             days_inactive = DateTime.diff(now, last_commit, :day)
-            
+
             repo_info = %{
               name: name,
               url: repo["html_url"],
@@ -43,6 +73,7 @@ defmodule EcoSyncBackend.Repos do
               language: repo["language"],
               visibility: if(repo["private"], do: "private", else: "public")
             }
+
             [repo_info | acc]
           else
             acc
@@ -63,31 +94,41 @@ defmodule EcoSyncBackend.Repos do
   Genera una auditoría de seguridad para la cuenta de GitHub.
   Analiza llaves SSH, Gists públicos e instalaciones de aplicaciones.
   """
+  @spec generate_security_audit(map(), integer()) :: map()
   def generate_security_audit(client, unused_months_threshold \\ 6) do
     now = DateTime.utc_now()
     threshold = DateTime.add(now, -(unused_months_threshold * 30 * 24 * 60 * 60), :second)
 
     # 1. SSH Keys
     ssh_keys = GitHubClient.get_ssh_keys(client)
-    old_ssh_keys = 
+
+    old_ssh_keys =
       Enum.reduce(ssh_keys, [], fn key, acc ->
         created_at = parse_datetime(key["created_at"])
         last_used = parse_datetime(key["last_used"])
 
-        is_old = 
+        is_old =
           cond do
-            last_used && DateTime.compare(last_used, threshold) == :lt -> true
-            is_nil(last_used) && created_at && DateTime.compare(created_at, threshold) == :lt -> true
-            true -> false
+            last_used && DateTime.compare(last_used, threshold) == :lt ->
+              true
+
+            is_nil(last_used) && created_at && DateTime.compare(created_at, threshold) == :lt ->
+              true
+
+            true ->
+              false
           end
 
         if is_old do
-          [%{
-            id: key["id"],
-            title: key["title"],
-            created_at: created_at,
-            last_used: last_used
-          } | acc]
+          [
+            %{
+              id: key["id"],
+              title: key["title"],
+              created_at: created_at,
+              last_used: last_used
+            }
+            | acc
+          ]
         else
           acc
         end
@@ -95,11 +136,12 @@ defmodule EcoSyncBackend.Repos do
 
     # 2. Public Gists
     gists = GitHubClient.get_public_gists(client)
-    public_gists_count = Enum.count(gists, & &1["public"] == true)
+    public_gists_count = Enum.count(gists, &(&1["public"] == true))
 
     # 3. App Installations
     installations = GitHubClient.get_user_installations(client)
-    installed_apps = 
+
+    installed_apps =
       Enum.map(installations, fn app ->
         %{
           id: app["id"],
@@ -119,6 +161,7 @@ defmodule EcoSyncBackend.Repos do
   @doc """
   Busca 'dead forks': repositorios que son forks y no han sido actualizados.
   """
+  @spec get_dead_forks(map(), integer()) :: dead_forks_result()
   def get_dead_forks(client, months \\ 6) do
     now = DateTime.utc_now()
     threshold = DateTime.add(now, -(months * 30 * 24 * 60 * 60), :second)
@@ -126,7 +169,7 @@ defmodule EcoSyncBackend.Repos do
     all_repos = GitHubClient.get_repos(client)
     forks = Enum.filter(all_repos, & &1["fork"])
 
-    dead_forks = 
+    dead_forks =
       forks
       |> Enum.reduce([], fn repo, acc ->
         owner = get_in(repo, ["owner", "login"])
@@ -138,7 +181,7 @@ defmodule EcoSyncBackend.Repos do
           acc
         else
           last_commit = GitHubClient.get_last_commit_date(client, owner, name) || pushed_at
-          
+
           if last_commit && DateTime.compare(last_commit, threshold) == :lt do
             # Obtenemos info del padre para enriquecer
             # Nota: En una versión scalable usaríamos concurrencia aquí (Task.async_stream)
@@ -152,6 +195,7 @@ defmodule EcoSyncBackend.Repos do
               parent_url: parent["html_url"] || "",
               last_commit_date: last_commit
             }
+
             [fork_info | acc]
           else
             acc
@@ -169,26 +213,28 @@ defmodule EcoSyncBackend.Repos do
   @doc """
   Escanea repositorios en busca de secretos expuestos.
   """
+  @spec scan_repositories_for_secrets(map(), String.t() | nil) :: secrets_result()
   def scan_repositories_for_secrets(client, repo_name \\ nil) do
-    repos_to_scan = 
+    repos_to_scan =
       if repo_name do
-        GitHubClient.get_repos(client) 
+        GitHubClient.get_repos(client)
         |> Enum.filter(&(String.downcase(&1["name"]) == String.downcase(repo_name)))
       else
         GitHubClient.get_repos(client)
       end
 
-    text_extensions = ~w(.py .js .ts .jsx .tsx .env .json .yml .yaml .txt .md .sh .bash .conf .ini .cfg .xml)
+    text_extensions =
+      ~w(.py .js .ts .jsx .tsx .env .json .yml .yaml .txt .md .sh .bash .conf .ini .cfg .xml)
 
-    results = 
+    results =
       repos_to_scan
       |> Enum.reduce([], fn repo, acc ->
         owner = get_in(repo, ["owner", "login"])
         name = repo["name"]
-        
+
         # Escaneo simple limitado a profundidad 2 para performance
         findings = scan_recursive(client, owner, name, "", 0, text_extensions, [])
-        
+
         if findings != [] do
           [%{repo_name: name, findings: findings} | acc]
         else
@@ -212,40 +258,55 @@ defmodule EcoSyncBackend.Repos do
           cond do
             item["type"] == "dir" && item["name"] not in ~w(.git node_modules venv __pycache__) ->
               scan_recursive(client, owner, repo, item["path"], depth + 1, extensions, inner_acc)
-            
+
             item["type"] == "file" ->
               ext = Path.extname(item["name"])
+
               if ext in extensions || String.starts_with?(item["name"], ".env") do
-                case EcoSyncBackend.GitHub.Client.get_file_content_from_url(client, item["download_url"]) do
+                case EcoSyncBackend.GitHub.Client.get_file_content_from_url(
+                       client,
+                       item["download_url"]
+                     ) do
                   content when is_binary(content) ->
                     findings = Scanner.scan_content(content)
-                    findings_with_path = Enum.map(findings, &Map.put(&1, :file_path, item["path"]))
+
+                    findings_with_path =
+                      Enum.map(findings, &Map.put(&1, :file_path, item["path"]))
+
                     inner_acc ++ findings_with_path
-                  _ -> inner_acc
+
+                  _ ->
+                    inner_acc
                 end
               else
                 inner_acc
               end
 
-            true -> inner_acc
+            true ->
+              inner_acc
           end
         end)
-      _ -> acc
+
+      _ ->
+        acc
     end
   end
+
   defp scan_recursive(_, _, _, _, _, _, acc), do: acc
 
   def matches_filters?(repo, filters) do
-    lang_match = 
+    lang_match =
       case filters[:language] do
         nil -> true
         lang -> String.downcase(repo["language"] || "") == String.downcase(lang)
       end
 
-    vis_match = 
+    vis_match =
       case filters[:visibility] do
-        nil -> true
-        vis -> 
+        nil ->
+          true
+
+        vis ->
           repo_vis = if repo["private"], do: "private", else: "public"
           String.downcase(repo_vis) == String.downcase(vis)
       end
@@ -254,6 +315,7 @@ defmodule EcoSyncBackend.Repos do
   end
 
   def parse_datetime(nil), do: nil
+
   def parse_datetime(date_str) do
     case DateTime.from_iso8601(String.replace(date_str, "Z", "+00:00")) do
       {:ok, dt, _} -> dt

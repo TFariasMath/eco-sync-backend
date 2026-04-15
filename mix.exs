@@ -33,7 +33,7 @@ defmodule EcoSyncBackend.MixProject do
   defp docs do
     [
       main: "EcoSyncBackend",
-      source_ref: "v#{version()}",
+      source_ref: "v1.0.0",
       source_url: "https://github.com/TFariasMath/eco-sync-backend",
       extras: ["CHANGELOG.md", "LICENSE", "LICENSE-DOCS", "README.md"]
     ]

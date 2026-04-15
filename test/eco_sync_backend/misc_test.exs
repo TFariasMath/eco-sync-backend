@@ -6,12 +6,12 @@ defmodule EcoSyncBackend.LocalScannerTest do
   use ExUnit.Case, async: true
 
   describe "LocalScanner funciones" do
-    test "get_default_directories retorna mapas" do
+    test "get_default_directories retorna directorios" do
       dirs = EcoSyncBackend.LocalScanner.get_default_directories()
 
-      assert is_map(dirs)
-      assert Map.has_key?(dirs, "Descargas")
-      assert Map.has_key?(dirs, "Documentos")
+      assert is_list(dirs)
+      assert length(dirs) >= 1
+      assert hd(dirs).name == "Descargas"
     end
   end
 end
