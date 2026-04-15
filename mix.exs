@@ -4,13 +4,19 @@ defmodule EcoSyncBackend.MixProject do
   def project do
     [
       app: :eco_sync_backend,
-      version: "0.1.0",
-      elixir: "~> 1.15",
+      version: "1.0.0",
+      elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      listeners: [Phoenix.CodeReloader]
+      docs: docs(),
+      reviewers: ["TFariasMath"],
+      licenses: ["MPL-2.0"],
+      links: %{
+        "Changelog" => "https://github.com/TFariasMath/eco-sync-backend/blob/main/CHANGELOG.md",
+        "License" => "https://github.com/TFariasMath/eco-sync-backend/blob/main/LICENSE"
+      }
     ]
   end
 
@@ -21,6 +27,15 @@ defmodule EcoSyncBackend.MixProject do
     [
       mod: {EcoSyncBackend.Application, []},
       extra_applications: [:logger, :runtime_tools]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "EcoSyncBackend",
+      source_ref: "v#{version()}",
+      source_url: "https://github.com/TFariasMath/eco-sync-backend",
+      extras: ["CHANGELOG.md", "LICENSE", "LICENSE-DOCS", "README.md"]
     ]
   end
 
@@ -41,19 +56,18 @@ defmodule EcoSyncBackend.MixProject do
     [
       {:phoenix, "~> 1.8.5"},
       {:phoenix_live_dashboard, "~> 0.8.3"},
-      {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
-      {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:cors_plug, "~> 3.0"},
-      {:ueberauth, "~> 0.10"},
-      {:ueberauth_github, "~> 0.8"},
-      {:ueberauth_google, "~> 0.10"},
-      {:reverse_proxy_plug, "~> 3.0"}
+
+      # Dev and test dependencies
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:excoveralls, "~> 0.18", only: :test},
+      {:mix_test_watch, "~> 1.0", only: :dev, runtime: false}
     ]
   end
 
